@@ -243,6 +243,13 @@ const getBookingDetails = async (req, res) => {
     const booking = await prisma.booking.findUnique({
       where: { id },
       include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        },
         items: {
           include: {
             asset: true,
@@ -316,6 +323,136 @@ const cancelBooking = async (req, res) => {
     res.status(200).json({ message: "Booking berhasil dibatalkan" });
   } catch (error) {
     console.error("Cancel booking error:", error);
+    res.status(500).json({ message: "Terjadi kesalahan server" });
+  }
+};
+
+// Get all bookings (for admin)
+const getAllBookings = async (req, res) => {
+  try {
+    // Hanya admin yang bisa akses
+    if (req.user.role !== "ADMIN") {
+      return res.status(403).json({ message: "Akses ditolak. Hanya admin yang dapat mengakses." });
+    }
+
+    const { 
+      status, 
+      page = 1, 
+      limit = 10, 
+      search,
+      startDate,
+      endDate 
+    } = req.query;
+
+    // Build where clause
+    const where = {};
+    
+    if (status) {
+      where.status = status.toUpperCase();
+    }
+    
+    if (search) {
+      where.OR = [
+        { id: { contains: search, mode: 'insensitive' } },
+        { user: { name: { contains: search, mode: 'insensitive' } } },
+        { user: { email: { contains: search, mode: 'insensitive' } } },
+        { notes: { contains: search, mode: 'insensitive' } }
+      ];
+    }
+    
+    if (startDate && endDate) {
+      where.createdAt = {
+        gte: new Date(startDate),
+        lte: new Date(endDate)
+      };
+    } else if (startDate) {
+      where.createdAt = {
+        gte: new Date(startDate)
+      };
+    } else if (endDate) {
+      where.createdAt = {
+        lte: new Date(endDate)
+      };
+    }
+
+    const bookings = await prisma.booking.findMany({
+      where,
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true
+          }
+        },
+        items: {
+          include: {
+            asset: { 
+              select: { 
+                name: true, 
+                code: true,
+                dailyRate: true
+              } 
+            },
+            service: { 
+              select: { 
+                name: true, 
+                code: true,
+                unitRate: true
+              } 
+            },
+          },
+        },
+        approver: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        },
+        payments: {
+          select: {
+            status: true,
+            amount: true
+          }
+        }
+      },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * parseInt(limit),
+      take: parseInt(limit),
+    });
+
+    const total = await prisma.booking.count({ where });
+
+    // Hitung total amount untuk setiap booking
+    const bookingsWithTotal = bookings.map(booking => {
+      const itemsTotal = booking.items.reduce((sum, item) => {
+        const price = item.asset ? item.asset.dailyRate : item.service?.unitRate;
+        return sum.plus(new Decimal(price || 0).times(item.qty));
+      }, new Decimal(0));
+      
+      const paidAmount = booking.payments
+        .filter(p => p.status === "PAID")
+        .reduce((sum, p) => sum.plus(new Decimal(p.amount || 0)), new Decimal(0));
+
+      return {
+        ...booking,
+        totalAmount: itemsTotal.toString(),
+        paidAmount: paidAmount.toString(),
+        outstandingAmount: itemsTotal.minus(paidAmount).toString()
+      };
+    });
+
+    res.status(200).json({ 
+      bookings: bookingsWithTotal, 
+      total, 
+      page: parseInt(page), 
+      limit: parseInt(limit),
+      totalPages: Math.ceil(total / parseInt(limit))
+    });
+  } catch (error) {
+    console.error("Get all bookings error:", error);
     res.status(500).json({ message: "Terjadi kesalahan server" });
   }
 };
@@ -420,6 +557,7 @@ module.exports = {
   getUserBookings,
   getBookingDetails,
   cancelBooking,
+  getAllBookings,
   approveBooking,
   rejectBooking,
 };
