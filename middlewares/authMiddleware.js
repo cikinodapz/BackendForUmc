@@ -1,30 +1,37 @@
 require('dotenv').config();
 const jwt = require('jsonwebtoken');
 
-const authMiddleware = async (req, res, next) => {
+const authMiddleware = (req, res, next) => {
   try {
-    // Get token from Authorization header
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ message: 'Tidak ada token, otorisasi ditolak' });
+    const authHeader = req.headers.authorization || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Tidak ada token, otorisasi ditolak" });
     }
 
-    // Extract token
-    const token = authHeader.split(' ')[1];
-
-    // Verify token
+    const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Attach user info to request object
-    req.user = decoded; // Contains userId and email from the token payload
-
-    next(); // Proceed to the next middleware or route handler
-  } catch (error) {
-    console.error('Authentication error:', error);
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ message: 'Token telah kedaluwarsa' });
+    // Normalisasi: pastikan selalu ada user.id
+    const id = decoded.id || decoded.userId || decoded.sub;
+    if (!id) {
+      return res.status(401).json({ message: "Token tidak memuat id user" });
     }
-    return res.status(401).json({ message: 'Token tidak valid' });
+
+    req.user = {
+      id,                              // <- konsisten dipakai controller
+      email: decoded.email || null,
+      role: decoded.role || null,
+      // simpan apapun yang kamu perlukan dari payload:
+      ...decoded,
+    };
+
+    next();
+  } catch (error) {
+    console.error("Authentication error:", error);
+    if (error.name === "TokenExpiredError") {
+      return res.status(401).json({ message: "Token telah kedaluwarsa" });
+    }
+    return res.status(401).json({ message: "Token tidak valid" });
   }
 };
 

@@ -20,7 +20,6 @@ datasource db {
 enum Role {
   ADMIN
   PEMINJAM
-  APPROVER
 }
 
 enum UserStatus {
@@ -117,6 +116,8 @@ model User {
   returns   Return[]   @relation("VerifiedBy")
   feedbacks Feedback[]
   notifs    Notification[]
+
+  Cart Cart[]
 }
 
 model Category {
@@ -147,6 +148,7 @@ model Asset {
   bookingItems BookingItem[]
 
   @@index([categoryId], map: "idx_assets_category")
+  Cart Cart[]
 }
 
 model Service {
@@ -165,6 +167,25 @@ model Service {
   bookingItems BookingItem[]
 
   @@index([categoryId], map: "idx_services_category")
+  Cart Cart[]
+}
+
+model Cart {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  itemType  ItemType
+  assetId   String?  @db.Uuid
+  serviceId String?  @db.Uuid
+  qty       Int      @default(1)
+  price     Decimal  @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  service Service? @relation(fields: [serviceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId], map: "idx_cart_user")
 }
 
 model Booking {

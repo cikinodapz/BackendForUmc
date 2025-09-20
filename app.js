@@ -11,6 +11,7 @@ var authRouter = require('./routes/authRoutes/authRoutes');
 var categoryRouter = require('./routes/categoryRoutes/categoryRoutes');
 var assetRouter = require('./routes/assetRoutes/assetRoutes');
 var serviceRouter = require('./routes/serviceRoutes/serviceRoutes');
+var cartRouter = require('./routes/cartRoutes/cartRoutes');
 
 
 var app = express();
@@ -39,6 +40,7 @@ app.use('/auth', authRouter)
 app.use('/categories', categoryRouter);
 app.use('/assets', assetRouter);
 app.use('/services', serviceRouter);
+app.use('/cart', cartRouter);
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
