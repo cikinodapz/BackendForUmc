@@ -4,7 +4,7 @@ const prisma = new PrismaClient();
 const getUserNotifications = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { read = false, page = 1, limit = 10 } = req.query; // read: true untuk sudah dibaca, false untuk unread, kosong untuk semua
+    const { read } = req.query; // read: true untuk sudah dibaca, false untuk unread, kosong untuk semua
 
     const where = { userId };
     if (read === 'true') {
@@ -16,13 +16,12 @@ const getUserNotifications = async (req, res) => {
     const notifications = await prisma.notification.findMany({
       where,
       orderBy: { sentAt: "desc" },
-      skip: (page - 1) * limit,
-      take: parseInt(limit),
+      // Menghapus skip dan take untuk menghilangkan pagination
     });
 
-    const total = await prisma.notification.count({ where });
+    const total = notifications.length; // Total sekarang sama dengan jumlah notifikasi
 
-    res.status(200).json({ notifications, total, page, limit });
+    res.status(200).json({ notifications, total });
   } catch (error) {
     console.error("Get user notifications error:", error);
     res.status(500).json({ message: "Terjadi kesalahan server" });

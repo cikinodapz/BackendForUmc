@@ -15,8 +15,8 @@ router.post("/checkout", authMiddleware, createBookingFromCart); // Checkout dar
 router.get("/", authMiddleware, getUserBookings);                // List booking user
 router.get("/:id", authMiddleware, getBookingDetails);          // Detail booking
 router.patch("/:id/cancel", authMiddleware, cancelBooking);     // Cancel booking
-router.get("/admin/all", authMiddleware, getAllBookings);             // List all bookings (admin/approver)
-router.patch("/:id/approve", authMiddleware, approveBooking);   // Approve (admin/approver)
-router.patch("/:id/reject", authMiddleware, rejectBooking);     // Reject (admin/approver)
+router.get("/admin/all", authMiddleware, getAllBookings);             // List all bookings (admin)
+router.patch("/:id/approve", authMiddleware, approveBooking);   // Approve (admin)
+router.patch("/:id/reject", authMiddleware, rejectBooking);     // Reject (admin)
 
 module.exports = router;
