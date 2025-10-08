@@ -1,7 +1,10 @@
+require('dotenv').config();
 const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const { OAuth2Client } = require("google-auth-library");
 const prisma = new PrismaClient();
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const login = async (req, res) => {
   try {
@@ -121,4 +124,82 @@ const getAllUsers = async (req, res) => {
   }
 };
 
-module.exports = { login, logout, register, getAllUsers };
+
+// =========================
+// Google Login (ID Token)
+// =========================
+const googleLogin = async (req, res) => {
+  try {
+    const idToken = req.body.idToken || req.body.credential; // support One Tap "credential"
+    if (!idToken) {
+      return res.status(400).json({ message: "idToken Google wajib disertakan" });
+    }
+
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      return res.status(500).json({ message: "GOOGLE_CLIENT_ID belum dikonfigurasi" });
+    }
+
+    // Verify token with Google
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      // audience: clientId,
+    });
+    const payload = ticket.getPayload();
+    const email = payload?.email;
+    const name = payload?.name || email?.split("@")[0] || "Pengguna";
+    const emailVerified = payload?.email_verified;
+
+    if (!email) {
+      return res.status(400).json({ message: "Email tidak ditemukan pada token Google" });
+    }
+    if (emailVerified === false) {
+      return res.status(400).json({ message: "Email Google belum terverifikasi" });
+    }
+
+    // Find or create user by email
+    let user = await prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        status: true,
+      },
+    });
+
+    if (!user) {
+      // Create with a random password to satisfy schema
+      const randomPass = Math.random().toString(36).slice(-12);
+      const passwordHash = await bcrypt.hash(randomPass, 10);
+      user = await prisma.user.create({
+        data: {
+          name,
+          email,
+          passwordHash,
+          role: "PEMINJAM",
+        },
+        select: { id: true, name: true, email: true, role: true, status: true },
+      });
+    }
+
+    // Issue our JWT
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      process.env.JWT_SECRET || "your_jwt_secret",
+      { expiresIn: "1h" }
+    );
+
+    return res.status(200).json({
+      message: "Login Google berhasil",
+      token,
+      user,
+    });
+  } catch (error) {
+    console.error("Google login error:", error);
+    return res.status(500).json({ message: "Terjadi kesalahan server" });
+  }
+};
+
+module.exports = { login, logout, register,googleLogin, getAllUsers };
