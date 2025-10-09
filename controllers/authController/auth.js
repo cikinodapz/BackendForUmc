@@ -1,5 +1,7 @@
 require('dotenv').config();
 const { PrismaClient } = require("@prisma/client");
+const path = require("path");
+const fs = require("fs");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { OAuth2Client } = require("google-auth-library");
@@ -202,4 +204,160 @@ const googleLogin = async (req, res) => {
   }
 };
 
-module.exports = { login, logout, register,googleLogin, getAllUsers };
+// Get profile of current user
+const getProfile = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: "User tidak terautentikasi" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        photoUrl: true,
+        role: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User tidak ditemukan" });
+    }
+
+    // Format absolute photo URL if available
+    const formatted = {
+      ...user,
+      photoUrl: user.photoUrl
+        ? `${req.protocol}://${req.get("host")}/uploads/${user.photoUrl}`
+        : null,
+    };
+
+    return res.status(200).json({ user: formatted });
+  } catch (error) {
+    console.error("Get profile error:", error);
+    return res.status(500).json({ message: "Terjadi kesalahan server" });
+  }
+};
+
+// Change password for current user
+const changePassword = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { currentPassword, oldPassword, newPassword } = req.body || {};
+    const providedCurrent = currentPassword || oldPassword;
+
+    if (!userId) {
+      return res.status(401).json({ message: "User tidak terautentikasi" });
+    }
+    if (!providedCurrent || !newPassword) {
+      return res.status(400).json({ message: "Masukkan password lama dan password baru" });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "Panjang password minimal 6 karakter" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
+    if (!user || !user.passwordHash) {
+      return res.status(400).json({ message: "Akun tidak memiliki password yang dapat diganti" });
+    }
+
+    const isMatch = await bcrypt.compare(providedCurrent, user.passwordHash);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Password saat ini salah" });
+    }
+
+    // Hindari password baru sama dengan password lama
+    const isSame = await bcrypt.compare(newPassword, user.passwordHash);
+    if (isSame) {
+      return res.status(400).json({ message: "Password baru tidak boleh sama dengan password lama" });
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({ where: { id: userId }, data: { passwordHash: newHash, updatedAt: new Date() } });
+
+    return res.status(200).json({ message: "Password berhasil diganti" });
+  } catch (error) {
+    console.error("Change password error:", error);
+    return res.status(500).json({ message: "Terjadi kesalahan server" });
+  }
+};
+
+// Update profile photo
+const updateProfilePhoto = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: "User tidak terautentikasi" });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: "File foto tidak ditemukan" });
+    }
+
+    // Get previous photo to delete
+    const existing = await prisma.user.findUnique({ where: { id: userId }, select: { photoUrl: true } });
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { photoUrl: req.file.filename, updatedAt: new Date() },
+      select: { id: true, name: true, email: true, phone: true, photoUrl: true }
+    });
+
+    // Delete old photo file if exists and different
+    try {
+      if (existing?.photoUrl && existing.photoUrl !== updated.photoUrl) {
+        const oldPath = path.join(__dirname, "../../uploads", existing.photoUrl);
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      }
+    } catch (e) {
+      console.warn("Failed to delete old profile photo:", e.message);
+    }
+
+    return res.status(200).json({
+      message: "Foto profil diperbarui",
+      user: {
+        ...updated,
+        photoUrl: updated.photoUrl
+          ? `${req.protocol}://${req.get("host")}/uploads/${updated.photoUrl}`
+          : null,
+      },
+    });
+  } catch (error) {
+    console.error("Update profile photo error:", error);
+    return res.status(500).json({ message: "Terjadi kesalahan server" });
+  }
+};
+
+// Serve current user's profile photo file
+const getProfilePhoto = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: "User tidak terautentikasi" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { photoUrl: true } });
+    if (!user || !user.photoUrl) {
+      return res.status(404).json({ message: "Foto profil tidak ditemukan" });
+    }
+
+    const filePath = path.join(__dirname, "../../uploads", user.photoUrl);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: "File foto tidak ditemukan" });
+    }
+
+    return res.sendFile(filePath);
+  } catch (error) {
+    console.error("Get profile photo error:", error);
+    return res.status(500).json({ message: "Terjadi kesalahan server" });
+  }
+};
+
+module.exports = { login, logout, register, googleLogin, getAllUsers, getProfile, changePassword, updateProfilePhoto, getProfilePhoto };

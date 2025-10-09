@@ -105,6 +105,7 @@ model User {
   name         String
   email        String      @unique
   phone        String?
+  photoUrl     String?
   passwordHash String
   role         Role        @default(PEMINJAM)
   status       UserStatus  @default(AKTIF)

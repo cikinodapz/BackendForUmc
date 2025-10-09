@@ -28,31 +28,37 @@ const calculateBookingTotal = async (bookingId) => {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
     include: {
-      items: {
-        include: {
-          asset: true,
-          service: true,
-        },
-      },
+      items: true,
     },
   });
 
   if (!booking) throw new Error("Booking tidak ditemukan");
 
+  // Gunakan totalAmount yang tersimpan jika tersedia (> 0)
+  try {
+    const storedTotal = new Decimal(booking.totalAmount || 0);
+    if (storedTotal.gt(0)) return storedTotal;
+  } catch (_) {
+    // fallback ke kalkulasi manual jika parsing gagal
+  }
+
+  // Kalkulasi manual konsisten dengan booking controller (inclusive +1 hari)
+  const startRaw = booking.startDate ?? booking.startDatetime;
+  const endRaw = booking.endDate ?? booking.endDatetime;
+  const start = startRaw ? new Date(startRaw) : null;
+  const end = endRaw ? new Date(endRaw) : null;
+
+  let durationDays = 1;
+  if (start && end && !isNaN(end - start)) {
+    durationDays = Math.max(Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1, 1);
+  }
+
   let total = new Decimal(0);
-
-  const start = new Date(booking.startDatetime);
-  const end = new Date(booking.endDatetime);
-  const durationDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
-
   for (const item of booking.items) {
-    if (item.itemType === "ASET") {
-      const itemTotal = new Decimal(item.asset.dailyRate).times(item.qty).times(durationDays);
-      total = total.plus(itemTotal);
-    } else if (item.itemType === "JASA") {
-      const itemTotal = new Decimal(item.service.unitRate).times(item.qty);
-      total = total.plus(itemTotal);
-    }
+    const qty = item.quantity ?? 1;
+    const price = new Decimal(item.unitPrice || 0);
+    const itemTotal = price.times(qty).times(durationDays);
+    total = total.plus(itemTotal);
   }
 
   return total;
@@ -151,7 +157,8 @@ const createPayment = async (req, res) => {
     const parameter = {
       transaction_details: {
         order_id: orderId,
-        gross_amount: amount.toNumber(),
+        // Midtrans mengharuskan integer untuk gross_amount
+        gross_amount: Math.round(amount.toNumber()),
       },
       customer_details: {
         first_name: firstName,
@@ -194,8 +201,9 @@ const createPayment = async (req, res) => {
         booking: {
           select: {
             id: true,
-            startDatetime: true,
-            endDatetime: true,
+            // Sesuaikan dengan skema terbaru
+            startDate: true,
+            endDate: true,
             status: true
           }
         }
@@ -249,10 +257,26 @@ const getPaymentDetails = async (req, res) => {
       include: { 
         booking: {
           select: {
+            id: true,
             userId: true,
-            startDatetime: true,
-            endDatetime: true,
-            status: true
+            // Sesuaikan dengan skema terbaru
+            startDate: true,
+            endDate: true,
+            status: true,
+            totalAmount: true,
+            items: {
+              select: {
+                id: true,
+                type: true,
+                quantity: true,
+                unitPrice: true,
+                subtotal: true,
+                notes: true,
+                service: { select: { id: true, name: true, unitRate: true, photoUrl: true } },
+                package: { select: { id: true, name: true, unitRate: true } },
+                asset: { select: { id: true, name: true, dailyRate: true, photoUrl: true } }
+              }
+            }
           }
         } 
       },
@@ -497,6 +521,10 @@ const checkPaymentStatus = async (req, res) => {
     const { paymentId } = req.params;
     const userId = req.user?.id;
 
+    if (!userId) {
+      return res.status(401).json({ message: "User tidak terautentikasi" });
+    }
+
     const payment = await prisma.payment.findUnique({
       where: { id: paymentId },
       include: { booking: { select: { userId: true } } }
@@ -506,7 +534,8 @@ const checkPaymentStatus = async (req, res) => {
       return res.status(404).json({ message: "Payment tidak ditemukan" });
     }
 
-    if (payment.booking.userId !== userId && req.user.role !== "ADMIN") {
+    const role = req.user?.role;
+    if (payment.booking.userId !== userId && role !== "ADMIN") {
       return res.status(403).json({ message: "Akses ditolak" });
     }
 
@@ -525,9 +554,59 @@ const checkPaymentStatus = async (req, res) => {
   }
 };
 
+// List all payments (Admin: semua, User: miliknya)
+const listPayments = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const role = req.user?.role;
+
+    if (!userId) {
+      return res.status(401).json({ message: "User tidak terautentikasi" });
+    }
+
+    const isAdmin = role === 'ADMIN';
+
+    const payments = await prisma.payment.findMany({
+      where: isAdmin ? {} : { booking: { userId } },
+      include: {
+        booking: {
+          select: {
+            id: true,
+            userId: true,
+            startDate: true,
+            endDate: true,
+            status: true,
+            totalAmount: true,
+            user: { select: { id: true, name: true, email: true } },
+            items: {
+              select: {
+                id: true,
+                type: true,
+                quantity: true,
+                unitPrice: true,
+                subtotal: true,
+                service: { select: { id: true, name: true, photoUrl: true } },
+                package: { select: { id: true, name: true } },
+                asset: { select: { id: true, name: true, photoUrl: true } }
+              }
+            }
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.status(200).json(payments);
+  } catch (error) {
+    console.error("List payments error:", error);
+    res.status(500).json({ message: "Terjadi kesalahan server" });
+  }
+};
+
 module.exports = {
   createPayment,
   getPaymentDetails,
   handleMidtransNotification,
   checkPaymentStatus,
+  listPayments,
 };
