@@ -2,21 +2,30 @@ const express = require("express");
 const router = express.Router();
 const {
   createBookingFromCart,
-  getUserBookings,
-  getBookingDetails,
+  createBooking,
+  getBookingsByUser,
+  updateBooking,
   cancelBooking,
   getAllBookings,
-  approveBooking,
+  getBookingById,
+  confirmBooking,
   rejectBooking,
-} = require("../../controllers/bookingController/booking"); // Sesuaikan path
+  completeBooking
+} = require("../../controllers/bookingController/booking");
 const authMiddleware = require("../../middlewares/authMiddleware");
 
-router.post("/checkout", authMiddleware, createBookingFromCart); // Checkout dari cart
-router.get("/", authMiddleware, getUserBookings);                // List booking user
-router.get("/:id", authMiddleware, getBookingDetails);          // Detail booking
-router.patch("/:id/cancel", authMiddleware, cancelBooking);     // Cancel booking
-router.get("/admin/all", authMiddleware, getAllBookings);             // List all bookings (admin)
-router.patch("/:id/approve", authMiddleware, approveBooking);   // Approve (admin)
-router.patch("/:id/reject", authMiddleware, rejectBooking);     // Reject (admin)
+//utk user yg sudah login
+router.post("/checkout", authMiddleware, createBookingFromCart); // buat booking dari cart
+router.post("/", authMiddleware, createBooking);                  // buat booking manual
+router.get("/", authMiddleware, getBookingsByUser);               // lihat semua booking user
+router.patch("/:id", authMiddleware, updateBooking);              // update booking
+router.delete("/:id", authMiddleware, cancelBooking);             // batalkan booking
+
+// utk admin (belum dibuat middleware khusus admin)
+router.get("/admin/all", authMiddleware, getAllBookings);               // Lihat semua booking
+router.get("/:id", authMiddleware, getBookingById);            // Lihat detail booking by ID
+router.patch("/:id/confirm", authMiddleware, confirmBooking);  // Konfirmasi booking
+router.patch("/:id/reject", authMiddleware, rejectBooking);    // Tolak booking
+router.patch("/:id/complete", authMiddleware, completeBooking);// Selesaikan booking
 
 module.exports = router;

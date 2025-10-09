@@ -113,7 +113,6 @@ model User {
 
   bookings  Booking[]
   approvals Booking[]  @relation("Approval")
-  returns   Return[]   @relation("VerifiedBy")
   feedbacks Feedback[]
   notifs    Notification[]
 
@@ -184,6 +183,7 @@ model Package {
 
   @@index([serviceId], map: "idx_packages_service")
   Cart Cart[]
+  BookingItem BookingItem[]
 }
 
 model Cart {
@@ -209,46 +209,51 @@ model Cart {
 }
 
 model Booking {
-  id            String        @id @default(uuid()) @db.Uuid
-  userId        String        @db.Uuid
-  type          BookingType   @default(CAMPUR)
-  startDatetime DateTime
-  endDatetime   DateTime
-  status        BookingStatus @default(MENUNGGU)
-  approvedBy    String?       @db.Uuid
-  approvedAt    DateTime?
-  notes         String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id          String        @id @default(uuid()) @db.Uuid
+  userId      String        @db.Uuid
+  approvalId  String?       @db.Uuid  // Admin yang approve
+  type        BookingType   @default(JASA)
+  status      BookingStatus @default(MENUNGGU)
+  startDate   DateTime?
+  endDate     DateTime?
+  totalAmount Decimal       @default("0") @db.Decimal(12, 2)
+  notes       String?       // Notes keseluruhan untuk booking
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
-  user     User  @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  approver User? @relation("Approval", fields: [approvedBy], references: [id], onDelete: SetNull, onUpdate: Cascade)
-
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  approval  User?         @relation("Approval", fields: [approvalId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   items     BookingItem[]
   payments  Payment[]
-  fines     Fine[]
   feedbacks Feedback[]
 
-  @@index([userId, status, startDatetime], map: "idx_bookings_user_status")
+  @@index([userId], map: "idx_bookings_user")
+  @@index([approvalId], map: "idx_bookings_approval")
 }
 
 model BookingItem {
-  id        String   @id @default(uuid()) @db.Uuid
-  bookingId String   @db.Uuid
-  itemType  ItemType
-  assetId   String?  @db.Uuid
-  serviceId String?  @db.Uuid
-  qty       Int      @default(1)
-  price     Decimal  @db.Decimal(12, 2)
+  id          String   @id @default(uuid()) @db.Uuid
+  bookingId   String   @db.Uuid
+  type        ItemType @default(JASA)
+  assetId     String?  @db.Uuid
+  serviceId   String?  @db.Uuid
+  packageId   String?  @db.Uuid
+  quantity    Int      @default(1)
+  unitPrice   Decimal?  @db.Decimal(12, 2)
+  subtotal    Decimal?  @db.Decimal(12, 2)
+  notes       String?  // Notes per item, bisa diambil dari cart jika dari cart
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime? @updatedAt
 
   booking Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  asset   Asset?   @relation(fields: [assetId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  service Service? @relation(fields: [serviceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  Return  Return?
+  asset   Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  service Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  package Package? @relation(fields: [packageId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
-  @@unique([bookingId, assetId], map: "uq_booking_asset")
-  @@unique([bookingId, serviceId], map: "uq_booking_service")
-  @@index([bookingId], map: "idx_bi_booking")
+  @@index([bookingId], map: "idx_booking_items_booking")
+  @@index([assetId], map: "idx_booking_items_asset")
+  @@index([serviceId], map: "idx_booking_items_service")
+  @@index([packageId], map: "idx_booking_items_package")
 }
 
 model Payment {
@@ -264,42 +269,8 @@ model Payment {
   updatedAt   DateTime      @updatedAt
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  fines   Fine[]
 
   @@index([bookingId], map: "idx_payments_booking")
-}
-
-model Return {
-  id             String    @id @default(uuid()) @db.Uuid
-  bookingItemId  String    @unique @db.Uuid
-  returnedAt     DateTime
-  conditionAfter Condition @default(BAIK)
-  notes          String?
-  verifiedBy     String?   @db.Uuid
-
-  bookingItem BookingItem @relation(fields: [bookingItemId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  verifier    User?       @relation("VerifiedBy", fields: [verifiedBy], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  fines       Fine[]
-
-  @@index([bookingItemId], map: "idx_returns_bi")
-}
-
-model Fine {
-  id        String    @id @default(uuid()) @db.Uuid
-  bookingId String    @db.Uuid
-  returnId  String?   @db.Uuid
-  type      FineType
-  amount    Decimal   @db.Decimal(12, 2)
-  isPaid    Boolean   @default(false)
-  paidAt    DateTime?
-  paymentId String?   @db.Uuid
-  notes     String?
-
-  booking Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  Return  Return?  @relation(fields: [returnId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-
-  @@index([bookingId], map: "idx_fines_booking")
 }
 
 model Feedback {
