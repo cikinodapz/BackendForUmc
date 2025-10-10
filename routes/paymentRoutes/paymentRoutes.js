@@ -4,7 +4,8 @@ const {
   createPayment,
   getPaymentDetails,
   checkPaymentStatus,
-  listPayments
+  listPayments,
+  getPaymentDetailsByBookingAdmin
 } = require("../../controllers/paymentController/payment"); // Sesuaikan path
 const authMiddleware = require("../../middlewares/authMiddleware");
 
@@ -23,5 +24,8 @@ router.post("/notification", (req, res) => {
 });
 
 router.get('/:paymentId/status', authMiddleware, checkPaymentStatus); 
+
+// Admin-only: detail pembayaran berdasarkan booking
+router.get('/admin/by-booking/:bookingId', authMiddleware, getPaymentDetailsByBookingAdmin);
 
 module.exports = router;

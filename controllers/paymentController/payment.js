@@ -1,4 +1,5 @@
 const { PrismaClient, PaymentMethod, PaymentStatus, BookingStatus, NotificationType } = require("@prisma/client");
+const { sendMail, buildUserPaymentSuccessEmail, buildAdminPaymentReceivedEmail } = require("../../services/mailer");
 const prisma = new PrismaClient();
 const Decimal = require("decimal.js");
 const midtransClient = require('midtrans-client');
@@ -366,8 +367,13 @@ const handleMidtransNotification = async (req, res) => {
       include: {
         booking: {
           select: {
+            id: true,
             userId: true,
-            status: true
+            status: true,
+            startDate: true,
+            endDate: true,
+            totalAmount: true,
+            user: { select: { id: true, name: true, email: true } }
           }
         }
       }
@@ -493,6 +499,44 @@ const handleMidtransNotification = async (req, res) => {
             )
           )
         );
+
+        // Kirim email ke user dan admin (opsional, jika SMTP terkonfigurasi)
+        try {
+          const baseUrl = process.env.BASE_APP_URL;
+          // Pastikan booking + user tersedia; jika kurang lengkap, ambil ulang
+          let bookingForEmail = payment.booking;
+          if (!bookingForEmail?.user || !bookingForEmail?.startDate) {
+            bookingForEmail = await prisma.booking.findUnique({
+              where: { id: payment.bookingId },
+              select: {
+                id: true,
+                startDate: true,
+                endDate: true,
+                totalAmount: true,
+                user: { select: { id: true, name: true, email: true } }
+              }
+            });
+          }
+
+          // Email ke user
+          const userEmail = bookingForEmail?.user?.email;
+          if (userEmail) {
+            const tplUser = buildUserPaymentSuccessEmail({ booking: bookingForEmail, user: bookingForEmail.user, baseUrl });
+            await sendMail({ to: userEmail, subject: tplUser.subject, text: tplUser.text, html: tplUser.html });
+          }
+
+          // Email ke admin
+          const adminRows = await prisma.user.findMany({ where: { role: "ADMIN" }, select: { email: true, name: true } });
+          const adminEmailsDb = adminRows.map((a) => a.email).filter(Boolean);
+          const envEmails = (process.env.ADMIN_EMAILS || "").split(",").map((e) => e.trim()).filter(Boolean);
+          const recipients = Array.from(new Set([ ...adminEmailsDb, ...envEmails ]));
+          if (recipients.length) {
+            const tplAdmin = buildAdminPaymentReceivedEmail({ booking: bookingForEmail, user: bookingForEmail?.user, baseUrl });
+            await sendMail({ to: recipients[0], bcc: recipients.slice(1), subject: tplAdmin.subject, text: tplAdmin.text, html: tplAdmin.html });
+          }
+        } catch (e) {
+          console.error("Send payment email error:", e.message);
+        }
         
         console.log(`🎉 Payment ${payment.id} successfully updated to PAID`);
       }
@@ -603,10 +647,93 @@ const listPayments = async (req, res) => {
   }
 };
 
+// Admin-only: get payment detail summary by booking
+const getPaymentDetailsByBookingAdmin = async (req, res) => {
+  try {
+    const role = req.user?.role;
+    const { bookingId } = req.params;
+
+    if (role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Akses ditolak, hanya admin' });
+    }
+
+    if (!bookingId) {
+      return res.status(400).json({ message: 'Booking ID diperlukan' });
+    }
+
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        id: true,
+        status: true,
+        startDate: true,
+        endDate: true,
+        totalAmount: true,
+        user: { select: { id: true, name: true, email: true } }
+      }
+    });
+
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking tidak ditemukan' });
+    }
+
+    const payments = await prisma.payment.findMany({
+      where: { bookingId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        amount: true,
+        method: true,
+        status: true,
+        paidAt: true,
+        referenceNo: true,
+        proofUrl: true,
+        createdAt: true,
+        updatedAt: true,
+      }
+    });
+
+    const latestPayment = payments[0] || null;
+    const isPaid = payments.some(p => p.status === PaymentStatus.PAID);
+
+    // computed summary fields
+    let durationDays = 1;
+    if (booking?.startDate && booking?.endDate) {
+      const start = new Date(booking.startDate);
+      const end = new Date(booking.endDate);
+      if (!isNaN(start) && !isNaN(end)) {
+        durationDays = Math.max(Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1, 1);
+      }
+    }
+    const subtotalSum = (booking?.items || []).reduce((acc, it) => acc + (parseFloat(it?.subtotal) || 0), 0);
+    const totalAmountNum = parseFloat(booking?.totalAmount) || 0;
+    const totalsConsistent = Math.abs(subtotalSum - totalAmountNum) < 0.01;
+
+    return res.status(200).json({
+      booking: booking,
+      summary: {
+        isPaid,
+        paymentCount: payments.length,
+        latestPaymentStatus: latestPayment?.status || null,
+        totalAmount: booking.totalAmount,
+        durationDays,
+        subtotalSum,
+        totalsConsistent,
+      },
+      payments,
+      latestPayment,
+    });
+  } catch (error) {
+    console.error('Get payment detail by booking (admin) error:', error);
+    return res.status(500).json({ message: 'Terjadi kesalahan server' });
+  }
+};
+
 module.exports = {
   createPayment,
   getPaymentDetails,
   handleMidtransNotification,
   checkPaymentStatus,
   listPayments,
+  getPaymentDetailsByBookingAdmin,
 };
