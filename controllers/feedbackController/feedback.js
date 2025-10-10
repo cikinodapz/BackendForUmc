@@ -191,7 +191,21 @@ async function getFeedbackByBooking(req, res) {
     const feedback = await prisma.feedback.findMany({
       where: { bookingId },
       orderBy: { createdAt: "desc" },
-      include: { user: { select: { id: true, name: true } } },
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+        booking: {
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            items: {
+              include: {
+                service: { include: { category: { select: { id: true, name: true } } } },
+                asset: { include: { category: { select: { id: true, name: true } } } },
+                package: true,
+              },
+            },
+          },
+        },
+      },
     });
     return res.status(200).json(feedback);
   } catch (error) {
