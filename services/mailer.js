@@ -137,7 +137,9 @@ function buildUserBookingStatusEmail({ booking, user, status, reason, baseUrl })
   const tanggal = `${new Date(booking?.startDate).toISOString().slice(0,10)} s/d ${new Date(booking?.endDate).toISOString().slice(0,10)}`
   const total = `Rp ${currencyIDR(booking?.totalAmount)}`
   const dashboardUrl = `${baseUrl}/auth/login`
-  const statusTitle = status === 'DIKONFIRMASI' ? 'Dikonfirmasi' : status === 'DITOLAK' ? 'Ditolak' : String(status || '-')
+  const statusTitle = status === 'DIKONFIRMASI' ? 'Dikonfirmasi' : status === 'DITOLAK' ? 'Ditolak' : status === 'SELESAI' ? 'Selesai' : String(status || '-')
+  const isCompleted = status === 'SELESAI'
+  const feedbackUrl = `${baseUrl}/feedback/${id}`
 
   const subject = `Status Booking ${id}: ${statusTitle}`
   const lines = [
@@ -148,6 +150,9 @@ function buildUserBookingStatusEmail({ booking, user, status, reason, baseUrl })
     `Total: ${total}`,
   ]
   if (reason) lines.push(`Catatan Admin: ${reason}`)
+  if (isCompleted) {
+    lines.push('', 'Kami sangat menghargai masukan Anda.', `Beri feedback: ${feedbackUrl}`)
+  }
   lines.push('', `Lihat detail di dashboard: ${dashboardUrl}`)
   const text = lines.join('\n')
 
@@ -186,6 +191,10 @@ function buildUserBookingStatusEmail({ booking, user, status, reason, baseUrl })
                 </tr>
               </table>
               ${reasonHtml}
+              ${isCompleted ? `<div style="margin-top:16px;padding:12px;border:1px dashed #93c5fd;border-radius:10px;background:#eff6ff">
+                <p style="margin:0 0 10px 0;font-size:14px;color:#1e3a8a"><strong>Bagikan pengalaman Anda!</strong> Bantu kami meningkat dengan memberikan umpan balik.</p>
+                <a href="${feedbackUrl}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:10px 16px;border-radius:10px;font-weight:600">Beri Feedback</a>
+              </div>` : ''}
               <div style="margin-top:20px">
                 <a href="${dashboardUrl}" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:10px 16px;border-radius:10px;font-weight:600">Lihat di Dashboard</a>
               </div>
@@ -341,3 +350,74 @@ function buildAdminPaymentReceivedEmail({ booking, user, baseUrl }) {
 }
 
 module.exports.buildAdminPaymentReceivedEmail = buildAdminPaymentReceivedEmail
+
+// Admin email: Booking completed
+function buildAdminBookingCompletedEmail({ booking, user, baseUrl }) {
+  const id = booking?.id || '-'
+  const tanggal = `${new Date(booking?.startDate).toISOString().slice(0,10)} s/d ${new Date(booking?.endDate).toISOString().slice(0,10)}`
+  const total = `Rp ${currencyIDR(booking?.totalAmount)}`
+  const dashboardUrl = `${baseUrl}/auth/login`
+
+  const subject = `Booking Selesai ${id}`
+  const text = [
+    'Sebuah booking telah ditandai selesai:',
+    `ID: ${id}`,
+    `User: ${user?.name || '-'} <${user?.email || '-'}>`,
+    `Tanggal: ${tanggal}`,
+    `Total: ${total}`,
+    '',
+    `Buka dashboard admin: ${dashboardUrl}`,
+  ].join('\n')
+
+  const html = `
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f7fb;padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.06);overflow:hidden;font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;color:#0f172a">
+          <tr>
+            <td style="background:linear-gradient(90deg,#0ea5e9,#22d3ee);padding:20px 24px;color:#fff;">
+              <h1 style="margin:0;font-size:20px;line-height:1.4;">UMC Media Hub</h1>
+              <p style="margin:4px 0 0 0;opacity:.9;font-size:13px;">Notifikasi Booking Selesai</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px">
+              <h2 style="margin:0 0 12px 0;font-size:18px;">Booking Telah Selesai</h2>
+              <p style="margin:0 0 16px 0;font-size:14px;color:#334155">Sebuah booking telah ditandai selesai oleh admin.</p>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
+                <tr>
+                  <td style="background:#f8fafc;padding:10px 14px;font-weight:600;width:30%">ID Booking</td>
+                  <td style="padding:10px 14px">${id}</td>
+                </tr>
+                <tr>
+                  <td style="background:#f8fafc;padding:10px 14px;font-weight:600">Pemesan</td>
+                  <td style="padding:10px 14px">${user?.name || '-'} &lt;${user?.email || '-'}&gt;</td>
+                </tr>
+                <tr>
+                  <td style="background:#f8fafc;padding:10px 14px;font-weight:600">Tanggal</td>
+                  <td style="padding:10px 14px">${tanggal}</td>
+                </tr>
+                <tr>
+                  <td style="background:#f8fafc;padding:10px 14px;font-weight:600">Total</td>
+                  <td style="padding:10px 14px">${total}</td>
+                </tr>
+              </table>
+              <div style="margin-top:20px">
+                <a href="${dashboardUrl}" style="display:inline-block;background:#0ea5e9;color:#fff;text-decoration:none;padding:10px 16px;border-radius:10px;font-weight:600">Buka Dashboard</a>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#0f172a;color:#cbd5e1;padding:16px 24px;font-size:12px;">
+              <div>© ${new Date().getFullYear()} UMC Media Hub. Semua hak dilindungi.</div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>`
+
+  return { subject, text, html }
+}
+
+module.exports.buildAdminBookingCompletedEmail = buildAdminBookingCompletedEmail

@@ -664,12 +664,25 @@ const getPaymentDetailsByBookingAdmin = async (req, res) => {
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       select: {
-        id: true,
-        status: true,
         startDate: true,
         endDate: true,
         totalAmount: true,
-        user: { select: { id: true, name: true, email: true } }
+        status: true,
+        user: { select: { id: true, name: true, email: true } },
+        notes: true,
+        items: {
+          select: {
+            id: true,
+            type: true,
+            quantity: true,
+            unitPrice: true,
+            subtotal: true,
+            notes: true,
+            service: { select: { id: true, name: true, unitRate: true, photoUrl: true, category: { select: { id: true, name: true } } } },
+            package: { select: { id: true, name: true, unitRate: true } },
+            asset: { select: { id: true, name: true, dailyRate: true, photoUrl: true } },
+          }
+        }
       }
     });
 

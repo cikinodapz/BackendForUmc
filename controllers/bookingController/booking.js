@@ -1,4 +1,5 @@
 const { PrismaClient, NotificationType } = require("@prisma/client");
+const { sendMail, buildAdminBookingEmail, buildUserBookingStatusEmail, buildAdminBookingCompletedEmail } = require("../../services/mailer");
 const prisma = new PrismaClient();
 
 // Helper untuk membuat notifikasi
@@ -143,7 +144,7 @@ const createBookingFromCart = async (req, res) => {
 
     // Kirim notifikasi ke semua admin
     try {
-      const admins = await prisma.user.findMany({ where: { role: "ADMIN" }, select: { id: true } });
+      const admins = await prisma.user.findMany({ where: { role: "ADMIN" }, select: { id: true, email: true, name: true } });
       await Promise.all(
         admins.map((admin) =>
           createNotification(
@@ -156,6 +157,49 @@ const createBookingFromCart = async (req, res) => {
       );
     } catch (e) {
       console.error("Send admin booking notification error:", e.message);
+    }
+
+    // Kirim email ke admin (opsional, jika SMTP terkonfigurasi)
+    try {
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } })
+      const adminRows = await prisma.user.findMany({ where: { role: "ADMIN" }, select: { email: true } })
+      const adminEmailsDb = adminRows.map((a) => a.email).filter(Boolean)
+      const envEmails = (process.env.ADMIN_EMAILS || "").split(",").map((e) => e.trim()).filter(Boolean)
+      const recipients = Array.from(new Set([ ...adminEmailsDb, ...envEmails ]))
+
+      if (recipients.length) {
+        const baseUrl = process.env.BASE_APP_URL
+        let subject = `Booking Baru ${booking.id} — Menunggu Konfirmasi`
+        let text = [
+          `Ada booking baru yang menunggu konfirmasi:`,
+          `ID: ${booking.id}`,
+          `User: ${user?.name || '-'} <${user?.email || '-'}>`,
+          `Tanggal: ${new Date(booking.startDate).toISOString().slice(0,10)} s/d ${new Date(booking.endDate).toISOString().slice(0,10)}`,
+          `Total: Rp ${Number(booking.totalAmount).toLocaleString('id-ID')}`,
+          ``,
+          `Buka dashboard admin untuk memproses: ${baseUrl}/auth/login`,
+        ].join("\n")
+        let html = `
+          <div style="font-family:Inter,system-ui,Arial,sans-serif;line-height:1.6">
+            <h2>Booking Baru Menunggu Konfirmasi</h2>
+            <p><strong>ID:</strong> ${booking.id}</p>
+            <p><strong>User:</strong> ${user?.name || '-'} &lt;${user?.email || '-'}&gt;</p>
+            <p><strong>Tanggal:</strong> ${new Date(booking.startDate).toISOString().slice(0,10)} s/d ${new Date(booking.endDate).toISOString().slice(0,10)}</p>
+            <p><strong>Total:</strong> Rp ${Number(booking.totalAmount).toLocaleString('id-ID')}</p>
+            ${booking.notes ? `<p><strong>Catatan:</strong> ${String(booking.notes).replace(/</g,'&lt;')}</p>` : ''}
+            <p style="margin-top:16px">
+              <a href="${baseUrl}/(main)/booking" style="background:#4f46e5;color:#fff;padding:8px 12px;border-radius:8px;text-decoration:none">Buka Dashboard</a>
+            </p>
+          </div>
+        `
+        const emailTpl = buildAdminBookingEmail({ booking, user, baseUrl: process.env.BASE_APP_URL })
+        subject = emailTpl.subject
+        text = emailTpl.text
+        html = emailTpl.html
+        await sendMail({ to: recipients[0], bcc: recipients.slice(1), subject, text, html })
+      }
+    } catch (e) {
+      console.error("Send admin booking email error:", e.message)
     }
 
     res.status(201).json({
@@ -551,6 +595,17 @@ const confirmBooking = async (req, res) => {
       console.error("Send user confirm notification error:", e.message);
     }
 
+    // Kirim email ke user
+    try {
+      const user = await prisma.user.findUnique({ where: { id: existingBooking.userId }, select: { name: true, email: true } })
+      if (user?.email) {
+        const email = buildUserBookingStatusEmail({ booking: updatedBooking, user, status: 'DIKONFIRMASI', baseUrl: process.env.BASE_APP_URL })
+        await sendMail({ to: user.email, subject: email.subject, text: email.text, html: email.html })
+      }
+    } catch (e) {
+      console.error("Send user confirm email error:", e.message)
+    }
+
     res.status(200).json({
       message: "Booking berhasil dikonfirmasi",
       booking: updatedBooking
@@ -617,6 +672,17 @@ const rejectBooking = async (req, res) => {
       console.error("Send user reject notification error:", e.message);
     }
 
+    // Kirim email ke user tentang penolakan booking
+    try {
+      const user = await prisma.user.findUnique({ where: { id: existingBooking.userId }, select: { name: true, email: true } })
+      if (user?.email) {
+        const email = buildUserBookingStatusEmail({ booking: updatedBooking, user, status: 'DITOLAK', reason, baseUrl: process.env.BASE_APP_URL })
+        await sendMail({ to: user.email, subject: email.subject, text: email.text, html: email.html })
+      }
+    } catch (e) {
+      console.error("Send user reject email error:", e.message)
+    }
+
     res.status(200).json({
       message: "Booking berhasil ditolak",
       booking: updatedBooking
@@ -677,6 +743,31 @@ const completeBooking = async (req, res) => {
       );
     } catch (e) {
       console.error("Send user complete notification error:", e.message);
+    }
+    // Kirim email ke user tentang penyelesaian booking
+    try {
+      const user = await prisma.user.findUnique({ where: { id: existingBooking.userId }, select: { name: true, email: true } });
+      if (user?.email) {
+        const email = buildUserBookingStatusEmail({ booking: updatedBooking, user, status: 'SELESAI', baseUrl: process.env.BASE_APP_URL });
+        await sendMail({ to: user.email, subject: email.subject, text: email.text, html: email.html });
+      }
+    } catch (e) {
+      console.error("Send user complete email error:", e.message);
+    }
+    // Kirim email ke admin tentang penyelesaian booking
+    try {
+      const baseUrl = process.env.BASE_APP_URL;
+      const user = await prisma.user.findUnique({ where: { id: existingBooking.userId }, select: { name: true, email: true } });
+      const adminRows = await prisma.user.findMany({ where: { role: "ADMIN" }, select: { email: true } });
+      const adminEmailsDb = adminRows.map(a => a.email).filter(Boolean);
+      const envEmails = (process.env.ADMIN_EMAILS || "").split(",").map(e => e.trim()).filter(Boolean);
+      const recipients = Array.from(new Set([...adminEmailsDb, ...envEmails]));
+      if (recipients.length) {
+        const tpl = buildAdminBookingCompletedEmail({ booking: updatedBooking, user, baseUrl });
+        await sendMail({ to: recipients[0], bcc: recipients.slice(1), subject: tpl.subject, text: tpl.text, html: tpl.html });
+      }
+    } catch (e) {
+      console.error("Send admin complete email error:", e.message);
     }
     res.status(200).json({
       message: "Booking berhasil diselesaikan",
