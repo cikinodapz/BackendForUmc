@@ -118,6 +118,8 @@ model User {
   notifs    Notification[]
 
   Cart Cart[]
+
+  PasswordReset PasswordReset[]
 }
 
 model Category {
@@ -297,4 +299,21 @@ model Notification {
   readAt  DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+}
+
+/// Reset password OTP store
+model PasswordReset {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  email      String
+  otpHash    String   // hashed OTP
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+  attempts   Int      @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([email], map: "idx_passwordreset_email")
+  @@index([userId], map: "idx_passwordreset_user")
 }

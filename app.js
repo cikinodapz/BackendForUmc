@@ -16,6 +16,7 @@ var bookingRouter = require('./routes/bookingRoutes/bookingRoutes');
 var notificationRouter = require('./routes/notificationRoutes/notificationRoutes');
 var paymentRouter = require('./routes/paymentRoutes/paymentRoutes');
 var feedbackRouter = require('./routes/feedbackRoutes/feedbackRoutes');
+var dashboardRouter = require('./routes/dashboardRoutes/dashboardRoutes');
 
 
 var app = express();
@@ -49,6 +50,7 @@ app.use('/bookings', bookingRouter);
 app.use('/notifications', notificationRouter);
 app.use('/payments', paymentRouter);
 app.use('/feedbacks', feedbackRouter);
+app.use('/dashboard', dashboardRouter);
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
